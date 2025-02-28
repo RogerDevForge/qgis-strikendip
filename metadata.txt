@@ -3,7 +3,7 @@
 # This file should be included when you package your plugin.# Mandatory items:
 
 [general]
-name=Strike & Dip
+name=Strike and Dip
 qgisMinimumVersion=3.0
 description=Add a symbol for strike and dip directions, select type of structure and colour.
 version=0.1
