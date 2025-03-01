@@ -27,7 +27,7 @@ tags=python, geology, strike, dip
 
 homepage=https://tu-freiberg.de/
 category=Vector
-icon=icon.png
+icon=icon_prime.png
 # experimental flag
 experimental=True
 
