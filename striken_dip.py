@@ -24,11 +24,11 @@
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, QDate, QDateTime
 from qgis.PyQt.QtGui import QIcon, QColor
 from qgis.PyQt.QtWidgets import QAction, QMessageBox
-from qgis.core import (QgsProject, QgsFeature, QgsGeometry, QgsPoint, 
+from qgis.core import (QgsProject, QgsFeature, QgsGeometry, QgsPoint, QgsPointXY,
                       QgsVectorLayer, QgsField, QgsSymbol, QgsSvgMarkerSymbolLayer,
                       QgsSingleSymbolRenderer, QgsMarkerSymbol, QgsSimpleMarkerSymbolLayer,
                       QgsLineSymbolLayer, QgsProperty, QgsPalLayerSettings, 
-                      QgsVectorLayerSimpleLabeling)
+                      QgsVectorLayerSimpleLabeling, QgsSymbolLayer, QgsPropertyCollection)
 from qgis.gui import QgsMapTool
 
 from PyQt5.QtCore import Qt, QVariant, QPointF
@@ -220,7 +220,6 @@ class StrikenDip:
                 QgsField("symbol_color", QVariant.String),
                 QgsField("confidence", QVariant.String),
                 QgsField("notes", QVariant.String),
-                QgsField("measurement_date", QVariant.Date),
                 QgsField("created_date", QVariant.DateTime)
             ])
             strike_dip_layer.updateFields()
@@ -242,54 +241,70 @@ class StrikenDip:
         return max_id + 1
 
     def apply_strike_dip_symbology(self, layer):
-        """Apply proper symbology to visualize strike and dip symbols"""
-        # Create a new marker symbol
         symbol = QgsMarkerSymbol()
-        
-        # Remove any default symbol layers
         if symbol.symbolLayerCount() > 0:
             symbol.deleteSymbolLayer(0)
-        
-        # Create the strike line (longer horizontal line)
+
+        # Create sub-layers
         strike_line = QgsSimpleMarkerSymbolLayer.create({'name': 'line'})
-        strike_line.setColor(QColor(0, 0, 0))
-        strike_line.setSize(3.5)  # Length of the strike line
-        strike_line.setStrokeWidth(0.4)
-        
-        # Create the dip line (shorter perpendicular line)
         dip_line = QgsSimpleMarkerSymbolLayer.create({'name': 'line'})
-        dip_line.setColor(QColor(0, 0, 0))
-        dip_line.setSize(1.5)  # Length of the dip line
-        dip_line.setStrokeWidth(0.4)
-        # Rotate the dip line 90 degrees relative to the strike line
-        dip_line.setAngle(90)
-        # Offset the dip line to the "downhill" direction
-        dip_line.setOffset(QPointF(0, 0.75))
-        
-        # Add both lines to the symbol
+
+        # Append them ONCE
         symbol.appendSymbolLayer(strike_line)
         symbol.appendSymbolLayer(dip_line)
-        
-        # Set the rotation of the entire symbol based on the strike value
-        # We use property collection for proper data definition
-        from qgis.core import QgsProperty, QgsPropertyCollection
-        
-        # Create a data-defined property for rotation
-        rotation_property = QgsProperty.fromExpression("strike")
-        
-        # Apply rotation to the symbol itself
-        prop_collection = QgsPropertyCollection()
-        # Property 0 is usually the rotation/angle in most QGIS versions
-        # Try different IDs (0, 1, 2, etc.) if this doesn't work
-        prop_collection.setProperty(0, rotation_property)
-        symbol.setDataDefinedProperties(prop_collection)
-        
-        # Apply the symbol to the layer
+
+        # Color property for both lines
+        color_property = QgsProperty.fromExpression(
+            """
+            CASE
+            WHEN "symbol_color" = 'Black'  THEN '0,0,0,255'
+            WHEN "symbol_color" = 'Red'    THEN '255,0,0,255'
+            WHEN "symbol_color" = 'Blue'   THEN '0,0,255,255'
+            WHEN "symbol_color" = 'Green'  THEN '0,128,0,255'
+            WHEN "symbol_color" = 'Yellow' THEN '255,255,0,255'
+            ELSE '0,0,0,255'
+            END
+            """
+        )
+
+        # Size property for each line
+        size_property_strike = QgsProperty.fromExpression("symbol_size * 1.4")
+        size_property_dip    = QgsProperty.fromExpression("symbol_size * 0.3")
+
+        # ---- Strike line: angle = "strike" ----
+        strike_line_props = QgsPropertyCollection()
+        strike_line_props.setProperty(
+            QgsSymbolLayer.PropertyAngle,
+            QgsProperty.fromExpression('"strike"')
+        )
+        strike_line_props.setProperty(QgsSymbolLayer.PropertyStrokeColor, color_property)
+        strike_line_props.setProperty(QgsSymbolLayer.PropertySize, size_property_strike)
+        strike_line.setDataDefinedProperties(strike_line_props)
+
+        # ---- Dip line: angle = "strike" + 90, plus an offset ----
+        dip_line_props = QgsPropertyCollection()
+        dip_line_props.setProperty(
+            QgsSymbolLayer.PropertyAngle,
+            QgsProperty.fromExpression('"strike" + 90')
+        )
+        dip_line_props.setProperty(QgsSymbolLayer.PropertyStrokeColor, color_property)
+        dip_line_props.setProperty(QgsSymbolLayer.PropertySize, size_property_dip)
+
+        # Offset so the dip line “ticks” off of the strike line instead of intersecting
+        #
+        # For example, shift it by half its own length in the Y direction so it starts
+        # at the strike line. You may need to adjust sign/scale to get the look you want.
+        dip_line_props.setProperty(
+            QgsSymbolLayer.PropertyOffset,
+            QgsProperty.fromExpression("concat( 0, ',', ( \"symbol_size\" * 0.3 / 2 ) )")
+        )
+        dip_line.setDataDefinedProperties(dip_line_props)
+
+        # Assign symbol to the layer
         renderer = QgsSingleSymbolRenderer(symbol)
         layer.setRenderer(renderer)
-        
-        # Refresh the layer display
         layer.triggerRepaint()
+        self.iface.mapCanvas().refresh()
 
     def run(self):
         """Run method that performs all the real work"""
@@ -303,9 +318,6 @@ class StrikenDip:
             self.first_start = False
             self.dlg = StrikenDipDialog()
             
-        # Set current date for measurement date
-        self.dlg.dteMeasurement.setDate(QDate.currentDate())
-        
         # Get map canvas center coordinates
         mc = self.iface.mapCanvas()
         center = mc.center()
@@ -331,7 +343,6 @@ class StrikenDip:
             symbol_color = self.dlg.cmbColor.currentText()
             confidence = self.dlg.cmbConfidence.currentText()
             notes = self.dlg.txtNotes.toPlainText()
-            measurement_date = self.dlg.dteMeasurement.date().toPyDate()
             latitude = self.dlg.spbLatitude.value()
             longitude = self.dlg.spbLongitude.value()
             
@@ -351,19 +362,12 @@ class StrikenDip:
             feature.setAttribute("symbol_color", symbol_color)
             feature.setAttribute("confidence", confidence)
             feature.setAttribute("notes", notes)
-            # Make sure measurement_date is a proper date object, not a string
-            # If the line above is causing problems, modify it to:
-            if isinstance(measurement_date, str) and not measurement_date:
-                # If it's an empty string, use current date
-                feature.setAttribute("measurement_date", QDate.currentDate().toPyDate())
-            else:
-                # Otherwise use the date from the form
-                feature.setAttribute("measurement_date", measurement_date)
-                feature.setAttribute("created_date", QDateTime.currentDateTime())
+            feature.setAttribute("created_date", QDateTime.currentDateTime())
             
             # Set geometry
-            point = QgsGeometry.fromPointXY(center)
-            feature.setGeometry(point)
+            point = QgsPointXY(longitude, latitude)
+            point_geom = QgsGeometry.fromPointXY(point)
+            feature.setGeometry(point_geom)
             
             # Add feature to layer
             strike_dip_layer.startEditing()
@@ -377,5 +381,5 @@ class StrikenDip:
             QMessageBox.information(
                 self.dlg, 
                 "Success", 
-                f"Strike and Dip measurement added:\n\nMeasurement ID: {measurement_id}\nUnit: {unit}\nStrike: {strike}°\nDip: {dip}°\nLocation: ({longitude}, {latitude})"
+                f"Strike and Dip measurement added:\n\nMeasurement ID: {measurement_id}\nUnit: {unit}\nStrike: {strike}°\nDip: {dip}°\nLocation: ({latitude}, {longitude})"
             )
