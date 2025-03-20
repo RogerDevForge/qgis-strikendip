@@ -45,7 +45,7 @@ class StrikenDipDialog(QtWidgets.QDialog, FORM_CLASS):
         
         # Connect signals and slots
         self.cmbStructureType.currentTextChanged.connect(self.on_structure_type_changed)
-        
+
     def on_structure_type_changed(self, structure_type):
         """Adjust symbol size based on structure type"""
         if structure_type == "Bedding":

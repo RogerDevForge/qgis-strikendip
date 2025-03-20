@@ -317,7 +317,8 @@ class StrikenDip:
         if self.first_start == True:
             self.first_start = False
             self.dlg = StrikenDipDialog()
-            
+            # Add checkbox toggle handler
+            self.dlg.chkAutoCenter.toggled.connect(self.toggleCenter)
         # Get map canvas center coordinates
         mc = self.iface.mapCanvas()
         center = mc.center()
@@ -383,3 +384,16 @@ class StrikenDip:
                 "Success", 
                 f"Strike and Dip measurement added:\n\nMeasurement ID: {measurement_id}\nUnit: {unit}\nStrike: {strike}°\nDip: {dip}°\nLocation: ({latitude}, {longitude})"
             )
+
+
+    def toggleCenter(self, checked):
+        if checked:
+            mc = self.iface.mapCanvas()
+            center = mc.center()
+            self.dlg.spbLatitude.setValue(center.y())
+            self.dlg.spbLongitude.setValue(center.x())
+            self.dlg.spbLatitude.setEnabled(False)
+            self.dlg.spbLongitude.setEnabled(False)
+        else:
+            self.dlg.spbLatitude.setEnabled(True)
+            self.dlg.spbLongitude.setEnabled(True)
